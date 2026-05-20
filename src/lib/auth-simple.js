@@ -64,7 +64,7 @@ export async function loginUser(email, password) {
 
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, name, theme, role')
+      .select('id, email, name, theme, role, initial_balance')
       .eq('email', normalizedEmail)
       .eq('password', hashedPassword)
       .single();
@@ -86,7 +86,7 @@ export async function getUserById(userId) {
   try {
     const { data, error } = await supabase
       .from('users')
-      .select('id, email, name, theme, role')
+      .select('id, email, name, theme, role, initial_balance')
       .eq('id', userId)
       .single();
 

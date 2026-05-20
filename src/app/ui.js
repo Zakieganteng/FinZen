@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { formatCurrency, categories } from "../lib/data";
+import { formatCurrency, categories, incomeCategories } from "../lib/data";
 import { useRouter } from "next/navigation";
-import { showToast, getSmartCategorySuggestion, findRepeatableTransactions, handleCurrencyInputChange, parseCurrencyInput } from "../lib/utils";
+import { showToast, getSmartCategorySuggestion, findRepeatableTransactions, handleCurrencyInputChange, parseCurrencyInput, formatCurrencyInput } from "../lib/utils";
 import RepeatTransactionCard from "./components/RepeatTransactionCard";
 
 export function SummaryCard({ title, value, type = "text" }) {
@@ -100,13 +100,29 @@ export function SectionHeader({ title, subtitle }) {
 
 export function Modal({ open, onClose, title, description, children }) {
   const [mounted, setMounted] = useState(false);
-  
+  const [colorScheme, setColorScheme] = useState("light");
+
   useEffect(() => {
     setMounted(true);
   }, []);
-  
+
+  useEffect(() => {
+    const syncScheme = () => {
+      setColorScheme(
+        document.documentElement.classList.contains("dark") ? "dark" : "light"
+      );
+    };
+    syncScheme();
+    const observer = new MutationObserver(syncScheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   if (!open) return null;
-  
+
   const modalContent = (
     <div className="fixed inset-0" style={{ zIndex: 999999, position: "fixed", pointerEvents: "auto" }}>
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} style={{ pointerEvents: "auto" }} />
@@ -114,7 +130,7 @@ export function Modal({ open, onClose, title, description, children }) {
         <div 
           className="w-full max-w-md rounded-xl border border-base card shadow-2xl bg-[var(--card)] relative" 
           onClick={(e) => e.stopPropagation()}
-          style={{ pointerEvents: "auto" }}
+          style={{ pointerEvents: "auto", colorScheme }}
         >
           <div className="p-4 border-b border-base">
             <div className="text-base font-medium">{title}</div>
@@ -151,16 +167,16 @@ export function QuickExpenseModal({ open, onClose, onAdded }) {
     
     const item = {
       date: form.date,
+      type: "expense",
       category: form.category,
       amount: parsedAmount,
       note: form.note || "",
     };
-    
-    // Call onAdded callback if provided (parent will handle Supabase insert)
+
     if (onAdded) {
       await onAdded(item);
     }
-    
+
     localStorage.setItem("finzen-last-expense-prompt", ymd);
     onClose?.();
   }
@@ -178,14 +194,14 @@ export function QuickExpenseModal({ open, onClose, onAdded }) {
       description="Mulai kuatkan kebiasaanmu. Satu catatan kecil setiap hari."
     >
       <form onSubmit={handleSubmit} className="space-y-3">
-        <input className="w-full border border-base rounded-md px-3 py-2" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-        <select className="w-full border border-base rounded-md px-3 py-2" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+        <select className="form-control w-full border border-base rounded-md px-3 py-2" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
           {categories.map((c) => (
             <option key={c.id} value={c.name}>{c.name}</option>
           ))}
         </select>
-        <input className="w-full border border-base rounded-md px-3 py-2 bg-[var(--background)] text-foreground" type="text" placeholder="Jumlah (IDR)" value={form.amount} onChange={(e) => handleCurrencyInputChange(e, setForm, "amount")} />
-        <input className="w-full border border-base rounded-md px-3 py-2" placeholder="Catatan (opsional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" type="text" placeholder="Jumlah (IDR)" value={form.amount} onChange={(e) => handleCurrencyInputChange(e, setForm, "amount")} />
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" placeholder="Catatan (opsional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
         <div className="flex items-center justify-between pt-2">
           <button type="button" onClick={skipToday} className="text-sm text-muted hover:underline">Nanti saja</button>
           <div className="flex gap-2">
@@ -198,44 +214,72 @@ export function QuickExpenseModal({ open, onClose, onAdded }) {
   );
 }
 
-export function AddTransactionModal({ open, onClose, onAdded, initialCategory, quickMode = false }) {
+export function AddTransactionModal({
+  open,
+  onClose,
+  onAdded,
+  initialCategory,
+  initialType = "expense",
+  quickMode = false,
+}) {
   const today = new Date();
   const ymd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  
-  // Get smart category suggestion
-  const getInitialCategory = () => {
-    if (initialCategory) return initialCategory;
-    if (quickMode && typeof window !== "undefined") {
+
+  const categoryListForType = (type) =>
+    type === "income" ? incomeCategories : categories;
+
+  const getInitialCategory = (type) => {
+    if (initialCategory && (initialType === type || !initialType)) return initialCategory;
+    if (quickMode && type === "expense" && typeof window !== "undefined") {
       const transactions = JSON.parse(localStorage.getItem("finzen-transactions") || "[]");
       const suggestion = getSmartCategorySuggestion(transactions, today);
       return suggestion.category;
     }
-    return categories[0]?.name || "Lainnya";
+    return categoryListForType(type)[0]?.name || "Lainnya";
   };
 
-  const [form, setForm] = useState({ date: ymd, category: getInitialCategory(), amount: "", note: "" });
+  const [form, setForm] = useState({
+    date: ymd,
+    type: initialType,
+    category: getInitialCategory(initialType),
+    amount: "",
+    note: "",
+  });
   const [repeatable, setRepeatable] = useState([]);
-  
+
   useEffect(() => {
-    if (open && typeof window !== "undefined") {
-      // Reset form when modal opens
-      const suggestedCategory = initialCategory || (quickMode ? (() => {
-        const transactions = JSON.parse(localStorage.getItem("finzen-transactions") || "[]");
-        const suggestion = getSmartCategorySuggestion(transactions, new Date());
-        return suggestion.category;
-      })() : categories[0]?.name || "Lainnya");
-      setForm({ date: ymd, category: suggestedCategory, amount: "", note: "" });
-      
-      // Find repeatable transactions
-      const transactions = JSON.parse(localStorage.getItem("finzen-transactions") || "[]");
-      const repeatableTx = findRepeatableTransactions(transactions);
-      setRepeatable(repeatableTx);
-    }
-  }, [open, initialCategory, quickMode, ymd]);
-  
-  function handleRepeat(transaction) {
+    if (!open) return;
+    const type = initialType || "expense";
+    const suggestedCategory = getInitialCategory(type);
     setForm({
       date: ymd,
+      type,
+      category: suggestedCategory,
+      amount: "",
+      note: "",
+    });
+
+    if (typeof window !== "undefined") {
+      const transactions = JSON.parse(localStorage.getItem("finzen-transactions") || "[]");
+      setRepeatable(findRepeatableTransactions(transactions));
+    }
+  }, [open, initialCategory, initialType, quickMode, ymd]);
+
+  function handleTypeChange(type) {
+    const list = categoryListForType(type);
+    const stillValid = list.some((c) => c.name === form.category);
+    setForm({
+      ...form,
+      type,
+      category: stillValid ? form.category : list[0]?.name || "",
+    });
+  }
+
+  function handleRepeat(transaction) {
+    const type = transaction.type || "expense";
+    setForm({
+      date: ymd,
+      type,
       category: transaction.category,
       amount: formatCurrencyInput(transaction.amount),
       note: transaction.note || "",
@@ -249,9 +293,10 @@ export function AddTransactionModal({ open, onClose, onAdded, initialCategory, q
       showToast("⚠ Mohon lengkapi semua field", "warning");
       return;
     }
-    
+
     const item = {
       date: form.date,
+      type: form.type,
       category: form.category,
       amount: parsedAmount,
       note: form.note || "",
@@ -262,34 +307,142 @@ export function AddTransactionModal({ open, onClose, onAdded, initialCategory, q
       localStorage.setItem("finzen-last-category", form.category);
     }
     
-    // Call onAdded callback (parent will handle Supabase insert)
     if (onAdded) {
-      await onAdded(item);
+      try {
+        await onAdded(item);
+      } catch (err) {
+        console.error("Error saving transaction:", err);
+        showToast("Gagal menyimpan transaksi. Coba lagi.", "error");
+        return;
+      }
+    } else {
+      showToast("Transaksi tidak tersimpan. Silakan coba lagi dari halaman Transaksi.", "warning");
+      return;
     }
-    
+
     onClose?.();
   }
+
+  const activeCategories = categoryListForType(form.type);
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={quickMode ? "Quick Add Transaksi" : "Tambah Transaksi"}
-      description={quickMode ? "Catat pengeluaranmu dengan cepat." : "Catat pengeluaranmu hari ini."}
+      description={
+        form.type === "income"
+          ? "Catat pemasukan (gaji, uang saku, dll.)."
+          : quickMode
+            ? "Catat pengeluaranmu dengan cepat."
+            : "Catat pengeluaranmu hari ini."
+      }
     >
       <RepeatTransactionCard repeatable={repeatable} onRepeat={handleRepeat} />
       <form onSubmit={handleSubmit} className="space-y-3">
-        <input className="w-full border border-base rounded-md px-3 py-2" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
-        <select className="w-full border border-base rounded-md px-3 py-2" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-          {categories.map((c) => (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className={`flex-1 text-sm px-3 py-2 rounded-md border ${
+              form.type === "expense" ? "bg-[#2563eb] text-white border-[#2563eb]" : "border-base"
+            }`}
+            onClick={() => handleTypeChange("expense")}
+          >
+            Pengeluaran
+          </button>
+          <button
+            type="button"
+            className={`flex-1 text-sm px-3 py-2 rounded-md border ${
+              form.type === "income" ? "bg-[#22C55E] text-white border-[#22C55E]" : "border-base"
+            }`}
+            onClick={() => handleTypeChange("income")}
+          >
+            Pemasukan
+          </button>
+        </div>
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+        <select className="form-control w-full border border-base rounded-md px-3 py-2" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+          {activeCategories.map((c) => (
             <option key={c.id} value={c.name}>{c.name}</option>
           ))}
         </select>
-        <input className="w-full border border-base rounded-md px-3 py-2 bg-[var(--background)] text-foreground" type="text" placeholder="Jumlah (IDR)" value={form.amount} onChange={(e) => handleCurrencyInputChange(e, setForm, "amount")} />
-        <input className="w-full border border-base rounded-md px-3 py-2" placeholder="Catatan (opsional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" type="text" placeholder="Jumlah (IDR)" value={form.amount} onChange={(e) => handleCurrencyInputChange(e, setForm, "amount")} />
+        <input className="form-control w-full border border-base rounded-md px-3 py-2" placeholder="Catatan (opsional)" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} />
         <div className="flex items-center justify-end pt-2 gap-2">
           <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-md border border-base">Batal</button>
           <button type="submit" className="text-sm px-3 py-2 rounded-md border border-base bg-black/[.04] dark:bg-white/[.06]">Simpan</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+export function BalanceModal({ open, onClose, initialBalance = 0, onSave }) {
+  const [amount, setAmount] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setAmount(
+        initialBalance > 0 ? formatCurrencyInput(String(Math.round(initialBalance))) : ""
+      );
+    }
+  }, [open, initialBalance]);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    const parsed = parseCurrencyInput(amount);
+    if (parsed < 0) {
+      showToast("Saldo awal tidak boleh negatif.", "warning");
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(parsed);
+      onClose?.();
+    } catch (err) {
+      console.error("Error saving balance:", err);
+      showToast("Gagal menyimpan saldo awal.", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Atur saldo awal"
+      description="Saldo di dashboard = saldo awal + pemasukan − pengeluaran."
+    >
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div>
+          <label className="text-xs text-muted block mb-1">Saldo awal (IDR)</label>
+          <input
+            className="form-control w-full border border-base rounded-md px-3 py-2"
+            type="text"
+            placeholder="Contoh: 2.000.000"
+            value={amount}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setAmount(raw ? formatCurrencyInput(raw) : "");
+            }}
+          />
+        </div>
+        <p className="text-xs text-muted">
+          Isi jumlah uang yang Anda punya saat mulai mencatat di FinZen. Pemasukan dan pengeluaran akan menyesuaikan saldo otomatis.
+        </p>
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" className="text-sm px-3 py-2 rounded-md border border-base" onClick={onClose} disabled={saving}>
+            Batal
+          </button>
+          <button
+            type="submit"
+            className="text-sm px-3 py-2 rounded-md border border-base bg-black/[.04] dark:bg-white/[.06]"
+            disabled={saving}
+          >
+            {saving ? "Menyimpan…" : "Simpan"}
+          </button>
         </div>
       </form>
     </Modal>

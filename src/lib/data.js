@@ -11,11 +11,22 @@ export const dashboardSummary = {
   goalsProgressAvg: 0.33,
 };
 
+/** Kategori pengeluaran (budget & transaksi keluar) */
 export const categories = [
   { id: "food", name: "Makan", color: "#3B82F6", budget: 600000, spent: 220000 },
   { id: "transport", name: "Transportasi", color: "#22C55E", budget: 300000, spent: 120000 },
   { id: "entertainment", name: "Hiburan", color: "#A855F7", budget: 400000, spent: 260000 },
   { id: "savings", name: "Tabungan", color: "#EAB308", budget: 800000, spent: 800000 },
+  { id: "other_expense", name: "Lainnya", color: "#6B7280", budget: 0, spent: 0 },
+];
+
+/** Kategori pemasukan */
+export const incomeCategories = [
+  { id: "salary", name: "Gaji" },
+  { id: "allowance", name: "Uang Saku" },
+  { id: "bonus", name: "Bonus" },
+  { id: "transfer_in", name: "Transfer Masuk" },
+  { id: "other_income", name: "Lainnya (Pemasukan)" },
 ];
 
 export const transactions = [

@@ -1,6 +1,6 @@
 "use client";
 
-import { SummaryCard, ProgressBar, Card, SectionHeader, QuickExpenseModal } from "./ui";
+import { SummaryCard, ProgressBar, Card, SectionHeader, QuickExpenseModal, BalanceModal } from "./ui";
 import DailyFocusCard from "./components/DailyFocusCard";
 import InsightCards from "./components/InsightCards";
 import WeeklyChallengeCard from "./components/WeeklyChallengeCard";
@@ -13,7 +13,8 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { getDailyFocusAction, calculateStreak, checkBadges, showToast } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
-import { getTransactions, getBudgets, getGoals, getGoalHistory, createTransaction } from "../lib/supabase/data-service";
+import { getTransactions, getBudgets, getGoals, getGoalHistory, createTransaction, updateUserInitialBalance } from "../lib/supabase/data-service";
+import { calculateBalance, isExpense } from "../lib/balance";
 
 // Lazy load Recharts components
 const ResponsiveContainer = dynamic(() => import("recharts").then(mod => mod.ResponsiveContainer), { ssr: false });
@@ -26,8 +27,9 @@ const LineChart = dynamic(() => import("recharts").then(mod => mod.LineChart), {
 const Line = dynamic(() => import("recharts").then(mod => mod.Line), { ssr: false });
 
 export default function Home() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, refreshUser } = useAuth();
   const [openQuickExpense, setOpenQuickExpense] = useState(false);
+  const [openBalanceModal, setOpenBalanceModal] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [userGoals, setUserGoals] = useState([]);
@@ -66,6 +68,7 @@ export default function Home() {
           id: t.id,
           date: t.date,
           category: t.category,
+          type: t.type || "expense",
           amount: parseFloat(t.amount),
           note: t.note || "",
         }));
@@ -145,6 +148,32 @@ export default function Home() {
     loadData();
   }, [user?.id, authLoading]);
 
+  useEffect(() => {
+    const onFabTransaction = (e) => {
+      const tx = e.detail;
+      if (!tx?.id) return;
+
+      setTransactions((prev) => {
+        if (prev.some((t) => t.id === tx.id)) return prev;
+        return [tx, ...prev];
+      });
+
+      const today = new Date();
+      const ym = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+      const txYm = String(tx.date).slice(0, 7);
+      if (txYm === ym && (tx.type || "expense") === "expense") {
+        setBudgets((prev) =>
+          prev.map((b) =>
+            b.name === tx.category ? { ...b, spent: b.spent + tx.amount } : b
+          )
+        );
+      }
+    };
+
+    window.addEventListener("finzen:transaction-added", onFabTransaction);
+    return () => window.removeEventListener("finzen:transaction-added", onFabTransaction);
+  }, []);
+
   const streak = useMemo(() => calculateStreak(transactions), [transactions]);
   const dailyFocusAction = useMemo(() => 
     getDailyFocusAction(transactions, budgets, userGoals, streak),
@@ -156,9 +185,11 @@ export default function Home() {
     const today = new Date();
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     
-    // Today spending
+    const initialBalance = parseFloat(user?.initial_balance) || 0;
+
+    // Today spending (pengeluaran saja)
     const todaySpending = transactions
-      .filter(t => t.date === todayStr)
+      .filter((t) => t.date === todayStr && isExpense(t))
       .reduce((sum, t) => sum + t.amount, 0);
 
     // Monthly budget used percentage
@@ -171,9 +202,7 @@ export default function Home() {
       ? userGoals.reduce((sum, g) => sum + (g.saved / g.target), 0) / userGoals.length
       : 0;
 
-    // Balance (simplified: assume starting balance, subtract all expenses)
-    // In real app, you might have income transactions too
-    const balance = 5000000 - transactions.reduce((sum, t) => sum + t.amount, 0);
+    const balance = calculateBalance(initialBalance, transactions);
 
     return {
       balance,
@@ -181,7 +210,7 @@ export default function Home() {
       monthlyBudgetUsedPct,
       goalsProgressAvg,
     };
-  }, [transactions, budgets, userGoals]);
+  }, [transactions, budgets, userGoals, user?.initial_balance]);
 
   // Calculate monthly spending by category
   const monthlySpendingByCategory = useMemo(() => {
@@ -191,7 +220,7 @@ export default function Home() {
     const monthTransactions = transactions.filter(t => t.date.startsWith(currentMonth));
     const categoryMap = new Map();
     
-    monthTransactions.forEach(t => {
+    monthTransactions.filter(isExpense).forEach(t => {
       const current = categoryMap.get(t.category) || 0;
       categoryMap.set(t.category, current + t.amount);
     });
@@ -224,13 +253,17 @@ export default function Home() {
         onAdded={async (item) => {
           if (!user?.id) return;
           try {
-            const { data, error } = await createTransaction(user.id, item);
+            const { data, error } = await createTransaction(user.id, {
+              ...item,
+              type: item.type || "expense",
+            });
             if (error) throw error;
             
             const newTransaction = {
               id: data.id,
               date: data.date,
               category: data.category,
+              type: data.type || item.type || "expense",
               amount: parseFloat(data.amount),
               note: data.note || "",
             };
@@ -274,8 +307,32 @@ export default function Home() {
         goalHistory={goalHistory}
       />
 
+      <BalanceModal
+        open={openBalanceModal}
+        onClose={() => setOpenBalanceModal(false)}
+        initialBalance={parseFloat(user?.initial_balance) || 0}
+        onSave={async (amount) => {
+          if (!user?.id) return;
+          const { error } = await updateUserInitialBalance(user.id, amount);
+          if (error) throw error;
+          await refreshUser();
+          showToast("Saldo awal berhasil disimpan.", "success");
+        }}
+      />
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <SummaryCard title="Saldo" value={dashboardSummary.balance} type="currency" />
+        <button
+          type="button"
+          onClick={() => setOpenBalanceModal(true)}
+          className="text-left rounded-xl border border-base p-4 card hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors"
+          title="Klik untuk atur saldo awal"
+        >
+          <div className="text-xs uppercase tracking-wide text-muted">Saldo</div>
+          <div className="text-2xl font-semibold mt-1">
+            {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(dashboardSummary.balance)}
+          </div>
+          <p className="text-xs text-muted mt-1">Ketuk untuk atur saldo awal</p>
+        </button>
         <SummaryCard title="Pengeluaran Hari Ini" value={dashboardSummary.todaySpending} type="currency" />
         <SummaryCard title="Budget Terpakai" value={dashboardSummary.monthlyBudgetUsedPct} type="percent" />
         <SummaryCard title="Rata-rata Progress Goals" value={dashboardSummary.goalsProgressAvg} type="percent" />
@@ -367,7 +424,7 @@ export default function Home() {
                   date.setDate(date.getDate() - i);
                   const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
                   const daySpending = transactions
-                    .filter(t => t.date === dateStr)
+                    .filter((t) => t.date === dateStr && isExpense(t))
                     .reduce((sum, t) => sum + t.amount, 0);
                   
                   weekData.push({

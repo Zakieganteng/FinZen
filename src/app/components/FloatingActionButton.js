@@ -2,9 +2,47 @@
 
 import { useState } from "react";
 import { AddTransactionModal } from "../ui";
+import { useAuth } from "../../contexts/AuthContext";
+import { createTransaction } from "../../lib/supabase/data-service";
+import { showToast } from "../../lib/utils";
 
 export default function FloatingActionButton() {
+  const { user } = useAuth();
   const [openModal, setOpenModal] = useState(false);
+
+  const onAdded = async (item) => {
+    if (!user?.id) {
+      showToast("Silakan login terlebih dahulu.", "warning");
+      throw new Error("not authenticated");
+    }
+
+    const { data, error } = await createTransaction(user.id, {
+      date: item.date,
+      category: item.category,
+      amount: item.amount,
+      type: item.type || "expense",
+      note: item.note || "",
+    });
+
+    if (error) throw error;
+
+    showToast("Transaksi berhasil disimpan.", "success");
+
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("finzen:transaction-added", {
+          detail: {
+            id: data.id,
+            date: data.date,
+            category: data.category,
+            type: data.type || item.type || "expense",
+            amount: parseFloat(data.amount),
+            note: data.note || "",
+          },
+        })
+      );
+    }
+  };
 
   return (
     <>
@@ -15,7 +53,12 @@ export default function FloatingActionButton() {
       >
         +
       </button>
-      <AddTransactionModal open={openModal} onClose={() => setOpenModal(false)} quickMode={true} />
+      <AddTransactionModal
+        open={openModal}
+        onClose={() => setOpenModal(false)}
+        onAdded={onAdded}
+        quickMode={true}
+      />
     </>
   );
 }

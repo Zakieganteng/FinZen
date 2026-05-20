@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, SectionHeader } from "../ui";
 import { useAuth } from "../../contexts/AuthContext";
 import { getTransactions } from "../../lib/supabase/data-service";
 import { showToast } from "../../lib/utils";
+import { isExpense } from "../../lib/balance";
+import {
+  downloadInstagramReport,
+  getPeriodLabel,
+  getPresetLabel,
+} from "../../lib/instagram-export";
 
 // Lazy load Recharts components
 const ResponsiveContainer = dynamic(() => import("recharts").then(mod => mod.ResponsiveContainer), { ssr: false });
@@ -43,6 +49,7 @@ export default function ReportsPage() {
           id: t.id,
           date: t.date,
           category: t.category,
+          type: t.type || "expense",
           amount: parseFloat(t.amount),
           note: t.note || "",
         }));
@@ -59,23 +66,29 @@ export default function ReportsPage() {
     loadTransactions();
   }, [user?.id, authLoading]);
 
-  const currentMonthTx = useMemo(() => transactions.filter(t => (t.date || "").startsWith(ym + "-")), [transactions, ym]);
-  const prevMonthTx = useMemo(() => transactions.filter(t => (t.date || "").startsWith(prevYm + "-")), [transactions, prevYm]);
+  const currentMonthTx = useMemo(
+    () => transactions.filter((t) => (t.date || "").startsWith(ym + "-") && isExpense(t)),
+    [transactions, ym]
+  );
+  const prevMonthTx = useMemo(
+    () => transactions.filter((t) => (t.date || "").startsWith(prevYm + "-") && isExpense(t)),
+    [transactions, prevYm]
+  );
 
   const txForPreset = useMemo(() => {
     if (preset === "this-month") return currentMonthTx;
     if (preset === "last-3") {
       const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      return transactions.filter(t => {
+      return transactions.filter((t) => {
         const d = new Date(t.date);
-        return d >= threeMonthsAgo && d <= now;
+        return d >= threeMonthsAgo && d <= now && isExpense(t);
       });
     }
     // YTD
     const start = new Date(now.getFullYear(), 0, 1);
-    return transactions.filter(t => {
+    return transactions.filter((t) => {
       const d = new Date(t.date);
-      return d >= start && d <= now;
+      return d >= start && d <= now && isExpense(t);
     });
   }, [preset, transactions, currentMonthTx, now]);
 
@@ -107,7 +120,7 @@ export default function ReportsPage() {
     const monthTransactions = transactions.filter(t => t.date.startsWith(ym));
     const categoryMap = new Map();
     
-    monthTransactions.forEach(t => {
+    monthTransactions.filter(isExpense).forEach((t) => {
       const current = categoryMap.get(t.category) || 0;
       categoryMap.set(t.category, current + t.amount);
     });
@@ -118,193 +131,75 @@ export default function ReportsPage() {
     }));
   }, [transactions, ym]);
 
-  const budgetKey = `finzen-budgets-${ym}`;
-  const budgetTotal = useMemo(() => {
+  const presetTotal = useMemo(
+    () => txForPreset.reduce((s, t) => s + (t.amount || 0), 0),
+    [txForPreset]
+  );
+
+  const chartsData = (preset === "this-month" ? currentAgg : presetAgg).length
+    ? preset === "this-month"
+      ? currentAgg
+      : presetAgg
+    : monthlySpendingByCategory;
+
+  const [exporting, setExporting] = useState(false);
+
+  function exportInstagramPng() {
+    if (chartsData.length === 0 && presetTotal === 0) {
+      showToast("Belum ada data untuk di-share. Catat transaksi dulu ya!", "warning");
+      return;
+    }
+
+    setExporting(true);
     try {
-      const arr = JSON.parse(localStorage.getItem(budgetKey) || "null");
-      if (!arr) return 0;
-      return arr.reduce((s,c)=>s+(c.budget||0),0);
-    } catch (e) { return 0; }
-  }, [budgetKey]);
-  const varianceToBudget = budgetTotal ? currentTotal - budgetTotal : 0;
+      const ok = downloadInstagramReport(
+        {
+          userName: user?.name || "kamu",
+          periodLabel: getPeriodLabel(preset, ym),
+          presetLabel: getPresetLabel(preset),
+          totalSpending: presetTotal,
+          momDelta,
+          momPct,
+          showMom: preset === "this-month",
+          topCategories: chartsData.map((r) => ({
+            category: r.category,
+            value: r.value,
+          })),
+        },
+        `finzen-recap-${preset}-${ym}.png`
+      );
 
-  function download(filename, content, type = "text/plain") {
-    const blob = new Blob([content], { type });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+      if (ok) {
+        showToast("PNG siap posting! Cek folder download kamu 📲✨", "success");
+      } else {
+        showToast("Gagal membuat gambar. Coba lagi.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      showToast("Gagal membuat gambar. Coba lagi.", "error");
+    } finally {
+      setExporting(false);
+    }
   }
-
-  function exportCsvRaw() {
-    const header = ["id","date","category","amount","note"]; 
-    const rows = [header.join(",")].concat(
-      transactions.map(t => [t.id, t.date, t.category, t.amount, (t.note||"").replace(/,/g,";")].join(","))
-    );
-    download(`finzen-transactions.csv`, rows.join("\n"), "text/csv;charset=utf-8");
-  }
-
-  function exportCsvAgg() {
-    const header = ["category","value"]; 
-    const rows = [header.join(",")].concat(
-      currentAgg.map(r => [r.category, r.value].join(","))
-    );
-    download(`finzen-agg-${ym}.csv`, rows.join("\n"), "text/csv;charset=utf-8");
-  }
-
-  function exportPngSummary() {
-    const width = 1080;
-    const height = 1350;
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext("2d");
-    // background
-    ctx.fillStyle = getComputedStyle(document.documentElement).classList?.contains?.("dark") ? "#0a0a0a" : "#ffffff";
-    // Fallback: use computed var
-    const bg = getComputedStyle(document.body).getPropertyValue("background-color") || "#ffffff";
-    ctx.fillStyle = bg;
-    ctx.fillRect(0,0,width,height);
-    // header
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("color") || "#171717";
-    ctx.font = "bold 48px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText("FinZen — Monthly Summary", 60, 120);
-    ctx.font = "24px system-ui, -apple-system, Segoe UI, Roboto";
-    ctx.fillText(`Periode: ${ym}`, 60, 170);
-    // cards
-    const cardY = 230;
-    const cardH = 180;
-    const gap = 40;
-    const cardW = (width - 60*2 - gap*2) / 3;
-    const metrics = [
-      { label: "Total Pengeluaran", value: currentTotal.toLocaleString("id-ID") },
-      { label: "MoM", value: `${momDelta>=0?"+":""}${momDelta.toLocaleString("id-ID")} (${Math.round(momPct*100)}%)` },
-      { label: "Vs Budget", value: budgetTotal?`${varianceToBudget>=0?"+":""}${varianceToBudget.toLocaleString("id-ID")}`:"-" },
-    ];
-    metrics.forEach((m, i) => {
-      const x = 60 + i*(cardW+gap);
-      // card bg
-      ctx.fillStyle = "rgba(0,0,0,0.06)";
-      const radius = 20;
-      roundRect(ctx, x, cardY, cardW, cardH, radius);
-      ctx.fill();
-      // text
-      ctx.fillStyle = getComputedStyle(document.body).getPropertyValue("color") || "#171717";
-      ctx.font = "bold 28px system-ui";
-      ctx.fillText(m.label, x+24, cardY+56);
-      ctx.font = "48px system-ui";
-      ctx.fillText(m.value, x+24, cardY+120);
-    });
-    // footer
-    ctx.font = "20px system-ui";
-    ctx.fillText("#FinZen • jaga konsistensi finansialmu", 60, height-60);
-
-    const link = document.createElement("a");
-    link.download = `finzen-summary-${ym}.png`;
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-  }
-
-  function roundRect(ctx, x, y, w, h, r) {
-    ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
-    ctx.closePath();
-  }
-
-  function copyCaption() {
-    const caption = `Laporan Bulanan ${ym}\nTotal: ${currentTotal.toLocaleString('id-ID')}\nMoM: ${momDelta>=0?'+':''}${momDelta.toLocaleString('id-ID')} (${Math.round(momPct*100)}%)\n#FinZen #FinancialHabit`;
-    navigator.clipboard.writeText(caption).catch(()=>{});
-  }
-
-  const chartsData = (preset === 'this-month' ? currentAgg : presetAgg).length ? (preset === 'this-month' ? currentAgg : presetAgg) : monthlySpendingByCategory;
-
-  const [showExportMenu, setShowExportMenu] = useState(false);
 
   return (
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Laporan</h1>
-        {/* Desktop: Show all buttons */}
-        <div className="hidden md:flex gap-2 flex-wrap">
-          <button className="text-sm px-3 py-2 rounded-md border border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors whitespace-nowrap" onClick={exportCsvRaw}>Ekspor CSV (Transaksi)</button>
-          <button className="text-sm px-3 py-2 rounded-md border border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors whitespace-nowrap" onClick={exportCsvAgg}>Ekspor CSV (Kategori/Bulan)</button>
-          <button className="text-sm px-3 py-2 rounded-md border border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors whitespace-nowrap" onClick={exportPngSummary}>Ekspor PNG (IG)</button>
-          <button className="text-sm px-3 py-2 rounded-md border border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors whitespace-nowrap" onClick={copyCaption}>Salin Caption</button>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Laporan</h1>
+          <p className="text-sm text-muted mt-1">Ringkas, shareable, vibes Gen Z 📲</p>
         </div>
-        {/* Mobile: Show dropdown menu */}
-        <div className="md:hidden relative">
-          <button
-            onClick={() => setShowExportMenu(!showExportMenu)}
-            className="w-full text-sm px-4 py-2 rounded-md border border-base bg-[var(--card)] hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors flex items-center justify-between"
-          >
-            <span>Ekspor & Salin</span>
-            <svg
-              className={`w-4 h-4 transition-transform ${showExportMenu ? 'rotate-180' : ''}`}
-              fill="none"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="2"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path d="M19 9l-7 7-7-7"></path>
-            </svg>
-          </button>
-          {showExportMenu && (
-            <>
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setShowExportMenu(false)}
-              />
-              <div className="absolute top-full left-0 right-0 mt-2 bg-[var(--card)] border border-base rounded-md shadow-lg z-20 overflow-hidden">
-                <button
-                  className="w-full text-left text-sm px-4 py-3 border-b border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors"
-                  onClick={() => {
-                    exportCsvRaw();
-                    setShowExportMenu(false);
-                  }}
-                >
-                  Ekspor CSV (Transaksi)
-                </button>
-                <button
-                  className="w-full text-left text-sm px-4 py-3 border-b border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors"
-                  onClick={() => {
-                    exportCsvAgg();
-                    setShowExportMenu(false);
-                  }}
-                >
-                  Ekspor CSV (Kategori/Bulan)
-                </button>
-                <button
-                  className="w-full text-left text-sm px-4 py-3 border-b border-base hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors"
-                  onClick={() => {
-                    exportPngSummary();
-                    setShowExportMenu(false);
-                  }}
-                >
-                  Ekspor PNG (IG)
-                </button>
-                <button
-                  className="w-full text-left text-sm px-4 py-3 hover:bg-black/[.03] dark:hover:bg-white/[.05] transition-colors"
-                  onClick={() => {
-                    copyCaption();
-                    setShowExportMenu(false);
-                  }}
-                >
-                  Salin Caption
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={exportInstagramPng}
+          disabled={exporting || loading}
+          className="text-sm font-semibold px-5 py-2.5 rounded-xl text-white shadow-lg hover:shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50 disabled:pointer-events-none whitespace-nowrap"
+          style={{
+            background: "linear-gradient(135deg, #a855f7 0%, #6366f1 45%, #22d3ee 100%)",
+          }}
+        >
+          {exporting ? "Bikin gambar…" : "📲 Share recap ke IG"}
+        </button>
       </div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-2">
@@ -326,8 +221,8 @@ export default function ReportsPage() {
           <div className="text-2xl font-semibold">{`${momDelta>=0?"+":""}${momDelta.toLocaleString("id-ID")} (${Math.round(momPct*100)}%)`}</div>
         </Card>
         <Card>
-          <SectionHeader title="Variance vs Budget" subtitle="Selisih dengan total anggaran" />
-          <div className="text-2xl font-semibold">{budgetTotal?`${varianceToBudget>=0?"+":""}${varianceToBudget.toLocaleString("id-ID")}`:"-"}</div>
+          <SectionHeader title="Total (rentang)" subtitle="Sesuai filter di atas" />
+          <div className="text-2xl font-semibold">{presetTotal.toLocaleString("id-ID")}</div>
         </Card>
       </div>
 

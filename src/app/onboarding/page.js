@@ -2,9 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { monthlySpendingByCategory } from "../../lib/data";
+import { useAuth } from "../../contexts/AuthContext";
+import { updateUserInitialBalance } from "../../lib/supabase/data-service";
+import { showToast, parseCurrencyInput, formatCurrencyInput } from "../../lib/utils";
 
 // Lazy load Recharts components
 const ResponsiveContainer = dynamic(() => import("recharts").then(mod => mod.ResponsiveContainer), { ssr: false });
@@ -18,7 +21,10 @@ const Line = dynamic(() => import("recharts").then(mod => mod.Line), { ssr: fals
 
 export default function OnboardingPage() {
   const router = useRouter();
+  const { user, refreshUser } = useAuth();
   const [theme, setTheme] = useState("light");
+  const [initialBalanceInput, setInitialBalanceInput] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const saved = typeof window !== "undefined" ? localStorage.getItem("finzen-theme") : null;
@@ -33,7 +39,24 @@ export default function OnboardingPage() {
     document.documentElement.classList.toggle("dark", t === "dark");
   }
 
-  function finish() {
+  async function finish() {
+    if (user?.id) {
+      const parsed = parseCurrencyInput(initialBalanceInput);
+      if (parsed > 0) {
+        setSaving(true);
+        try {
+          const { error } = await updateUserInitialBalance(user.id, parsed);
+          if (error) throw error;
+          await refreshUser();
+          showToast("Saldo awal tersimpan.", "success");
+        } catch (err) {
+          console.error(err);
+          showToast("Gagal menyimpan saldo awal. Coba dari dashboard.", "warning");
+        } finally {
+          setSaving(false);
+        }
+      }
+    }
     router.push("/");
   }
 
@@ -68,6 +91,23 @@ export default function OnboardingPage() {
         <button onClick={() => selectTheme("light")} className={`border rounded-lg p-4 ${theme === "light" ? "ring-2 ring-blue-500" : ""}`}>☀️ Light</button>
         <button onClick={() => selectTheme("dark")} className={`border rounded-lg p-4 ${theme === "dark" ? "ring-2 ring-blue-500" : ""}`}>🌙 Dark</button>
       </div>
+
+      <section className="rounded-lg border p-4 max-w-md space-y-3">
+        <h2 className="font-medium">Saldo awal (opsional)</h2>
+        <p className="text-sm text-black/70 dark:text-white/70">
+          Berapa uang yang Anda punya sekarang? Ini dipakai untuk menghitung saldo di dashboard.
+        </p>
+        <input
+          className="w-full border rounded-md px-3 py-2 bg-[var(--background)]"
+          type="text"
+          placeholder="Contoh: 2.000.000"
+          value={initialBalanceInput}
+          onChange={(e) => {
+            const raw = e.target.value;
+            setInitialBalanceInput(raw ? formatCurrencyInput(raw) : "");
+          }}
+        />
+      </section>
 
       <section className="space-y-3">
         <h2 className="font-medium">Quick Actions</h2>
@@ -120,7 +160,9 @@ export default function OnboardingPage() {
         <h3 className="font-medium">Motivasi Hari Ini</h3>
         <p className="text-sm text-black/80 dark:text-white/80 mt-2">"Langkah kecil konsisten mengalahkan lompatan besar yang jarang." — Ayo catat transaksi hari ini dan jangan putus streak!</p>
         <div className="mt-4">
-          <button onClick={finish} className="border rounded-md px-4 py-2 hover:bg-black/[.04] dark:hover:bg-white/[.06]">Mulai Sekarang</button>
+          <button onClick={finish} disabled={saving} className="border rounded-md px-4 py-2 hover:bg-black/[.04] dark:hover:bg-white/[.06] disabled:opacity-50">
+            {saving ? "Menyimpan…" : "Mulai Sekarang"}
+          </button>
         </div>
       </section>
     </div>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, SectionHeader, AddTransactionModal } from "../ui";
 import { checkBadges, calculateStreak, showToast } from "../../lib/utils";
+import { isExpense } from "../../lib/balance";
 import { pickRecordingBadgeUnlock } from "../../lib/badges";
 import BadgeUnlockModal from "../components/BadgeUnlockModal";
 import { useAuth } from "../../contexts/AuthContext";
@@ -21,6 +22,7 @@ export default function TransactionsPage() {
   const { user, loading: authLoading } = useAuth();
   const [transactions, setTransactions] = useState([]);
   const [openAdd, setOpenAdd] = useState(false);
+  const [addType, setAddType] = useState("expense");
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [badgeUnlock, setBadgeUnlock] = useState({ open: false, badgeId: null });
@@ -39,6 +41,7 @@ export default function TransactionsPage() {
           id: t.id,
           date: t.date,
           category: t.category,
+          type: t.type || "expense",
           amount: parseFloat(t.amount),
           note: t.note || "",
         })).sort((a, b) => {
@@ -59,9 +62,28 @@ export default function TransactionsPage() {
     loadTransactions();
   }, [user?.id, authLoading]);
 
+  useEffect(() => {
+    const onFabTransaction = (e) => {
+      const tx = e.detail;
+      if (!tx?.id) return;
+
+      setTransactions((prev) => {
+        if (prev.some((t) => t.id === tx.id)) return prev;
+        const next = [tx, ...prev];
+        return next.sort((a, b) => {
+          const dateCompare = b.date.localeCompare(a.date);
+          return dateCompare !== 0 ? dateCompare : b.id.localeCompare(a.id);
+        });
+      });
+    };
+
+    window.addEventListener("finzen:transaction-added", onFabTransaction);
+    return () => window.removeEventListener("finzen:transaction-added", onFabTransaction);
+  }, []);
+
   const dailyAgg = useMemo(() => {
     const map = new Map();
-    transactions.forEach((t) => {
+    transactions.filter(isExpense).forEach((t) => {
       map.set(t.date, (map.get(t.date) || 0) + t.amount);
     });
     return Array.from(map.entries())
@@ -88,6 +110,7 @@ export default function TransactionsPage() {
         date: item.date,
         category: item.category,
         amount: item.amount,
+        type: item.type || "expense",
         note: item.note || "",
       });
 
@@ -97,6 +120,7 @@ export default function TransactionsPage() {
         id: data.id,
         date: data.date,
         category: data.category,
+        type: data.type || item.type || "expense",
         amount: parseFloat(data.amount),
         note: data.note || "",
       };
@@ -157,14 +181,17 @@ export default function TransactionsPage() {
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Transaksi</h1>
-        <button onClick={() => setOpenAdd(true)} className="text-sm px-3 py-2 rounded-md border border-base bg-[#2563eb] text-white shadow-sm hover:shadow-md hover:-translate-y-[1px] transition">+ Tambah Transaksi</button>
+        <div className="flex gap-2">
+          <button onClick={() => { setAddType("expense"); setOpenAdd(true); }} className="text-sm px-3 py-2 rounded-md border border-base bg-[#2563eb] text-white shadow-sm hover:shadow-md transition">+ Pengeluaran</button>
+          <button onClick={() => { setAddType("income"); setOpenAdd(true); }} className="text-sm px-3 py-2 rounded-md border border-base bg-[#22C55E] text-white shadow-sm hover:shadow-md transition">+ Pemasukan</button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card>
           <SectionHeader title="Total Hari Ini" subtitle="Akumulasi transaksi" />
           <div className="text-2xl font-semibold">{transactions
-            .filter((t) => t.date === new Date().toISOString().slice(0,10))
+            .filter((t) => t.date === new Date().toISOString().slice(0,10) && isExpense(t))
             .reduce((s, t) => s + t.amount, 0).toLocaleString("id-ID")}</div>
         </Card>
         <Card>
@@ -198,6 +225,7 @@ export default function TransactionsPage() {
             <thead className="bg-black/[.03] dark:bg-white/[.06]">
               <tr>
                 <th className="text-left p-3">Tanggal</th>
+                <th className="text-left p-3">Tipe</th>
                 <th className="text-left p-3">Kategori</th>
                 <th className="text-left p-3">Jumlah</th>
                 <th className="text-left p-3">Catatan</th>
@@ -207,13 +235,21 @@ export default function TransactionsPage() {
               {paginatedTransactions.length > 0 ? paginatedTransactions.map((t) => (
                 <tr key={t.id} className="border-t border-base">
                   <td className="p-3">{t.date}</td>
+                  <td className="p-3">
+                    <span className={t.type === "income" ? "text-[#22C55E]" : "text-[#EF4444]"}>
+                      {t.type === "income" ? "Pemasukan" : "Pengeluaran"}
+                    </span>
+                  </td>
                   <td className="p-3">{t.category}</td>
-                  <td className="p-3">{t.amount.toLocaleString("id-ID")}</td>
+                  <td className="p-3">
+                    {t.type === "income" ? "+" : "−"}
+                    {t.amount.toLocaleString("id-ID")}
+                  </td>
                   <td className="p-3">{t.note}</td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-muted">
+                  <td colSpan={5} className="p-8 text-center text-muted">
                     Belum ada transaksi. Tambah transaksi pertama Anda!
                   </td>
                 </tr>
@@ -275,7 +311,12 @@ export default function TransactionsPage() {
         )}
       </Card>
 
-      <AddTransactionModal open={openAdd} onClose={() => setOpenAdd(false)} onAdded={onAdded} />
+      <AddTransactionModal
+        open={openAdd}
+        onClose={() => setOpenAdd(false)}
+        onAdded={onAdded}
+        initialType={addType}
+      />
 
       <BadgeUnlockModal
         open={badgeUnlock.open}

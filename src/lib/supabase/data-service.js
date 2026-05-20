@@ -44,6 +44,7 @@ export async function createTransaction(userId, transactionData) {
         date: transactionData.date,
         category: transactionData.category,
         amount: transactionData.amount,
+        type: transactionData.type || "expense",
         note: transactionData.note || null,
       })
       .select()
@@ -71,6 +72,7 @@ export async function updateTransaction(transactionId, transactionData) {
         date: transactionData.date,
         category: transactionData.category,
         amount: transactionData.amount,
+        type: transactionData.type || "expense",
         note: transactionData.note || null,
       })
       .eq("id", transactionId)
@@ -140,22 +142,23 @@ export async function getBudgets(userId, yearMonth) {
  */
 export async function upsertBudget(userId, budgetData) {
   try {
+    const row = {
+      user_id: userId,
+      category_id: budgetData.category_id,
+      category_name: budgetData.category_name,
+      year_month: budgetData.year_month,
+      budget_amount: budgetData.budget_amount,
+      color: budgetData.color || null,
+    };
+    if (budgetData.spent_amount !== undefined && budgetData.spent_amount !== null) {
+      row.spent_amount = budgetData.spent_amount;
+    }
+
     const { data, error } = await supabase
       .from("budgets")
-      .upsert(
-        {
-          user_id: userId,
-          category_id: budgetData.category_id,
-          category_name: budgetData.category_name,
-          year_month: budgetData.year_month,
-          budget_amount: budgetData.budget_amount,
-          color: budgetData.color || null,
-          spent_amount: budgetData.spent_amount || 0,
-        },
-        {
-          onConflict: "user_id,category_id,year_month",
-        }
-      )
+      .upsert(row, {
+        onConflict: "user_id,category_id,year_month",
+      })
       .select()
       .single();
 
@@ -350,6 +353,32 @@ export async function addGoalHistory(goalId, userId, historyData) {
     return { data, error: null };
   } catch (error) {
     console.error("Error adding goal history:", error);
+    return { data: null, error };
+  }
+}
+
+// ============================================
+// USER BALANCE
+// ============================================
+
+/**
+ * Update saldo awal user
+ * @param {string} userId
+ * @param {number} initialBalance
+ */
+export async function updateUserInitialBalance(userId, initialBalance) {
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .update({ initial_balance: initialBalance })
+      .eq("id", userId)
+      .select("id, email, name, theme, role, initial_balance")
+      .single();
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (error) {
+    console.error("Error updating initial balance:", error);
     return { data: null, error };
   }
 }
