@@ -27,7 +27,34 @@ export const badgeDefinitions = [
     },
   },
   
-  // Transaction badges
+  // Transaction badges — simulasi pencatat (tier 5 / 10 / 15)
+  {
+    id: "catatan_5",
+    name: "Pencatat Pemula",
+    description: "Telah mencatat minimal 5 transaksi",
+    icon: "📒",
+    category: "transaction",
+    threshold: 5,
+    condition: (data) => data.transactionCount >= 5,
+  },
+  {
+    id: "catatan_10",
+    name: "Pencatat Aktif",
+    description: "Telah mencatat minimal 10 transaksi",
+    icon: "📗",
+    category: "transaction",
+    threshold: 10,
+    condition: (data) => data.transactionCount >= 10,
+  },
+  {
+    id: "catatan_15",
+    name: "Pencatat Rajin",
+    description: "Telah mencatat minimal 15 transaksi",
+    icon: "📘",
+    category: "transaction",
+    threshold: 15,
+    condition: (data) => data.transactionCount >= 15,
+  },
   {
     id: "record_keeper",
     name: "Record Keeper",
@@ -115,5 +142,20 @@ export function getBadgeById(id) {
  */
 export function getBadgesByCategory(category) {
   return badgeDefinitions.filter(b => b.category === category);
+}
+
+/** Badge simulasi: penghargaan mencatat transaksi (5, 10, 15) */
+export const recordingBadgeDefinitions = badgeDefinitions.filter(
+  (b) => b.id === "catatan_5" || b.id === "catatan_10" || b.id === "catatan_15"
+);
+
+export const RECORDING_BADGE_IDS = recordingBadgeDefinitions.map((b) => b.id);
+
+/** Prioritas modal: tier tertinggi yang baru terbuka */
+export function pickRecordingBadgeUnlock(newlyUnlocked = []) {
+  const recording = newlyUnlocked.filter((id) => RECORDING_BADGE_IDS.includes(id));
+  if (recording.length === 0) return newlyUnlocked[0] ?? null;
+  const order = new Map(RECORDING_BADGE_IDS.map((id, i) => [id, i]));
+  return recording.sort((a, b) => order.get(b) - order.get(a))[0];
 }
 

@@ -5,6 +5,8 @@ import DailyFocusCard from "./components/DailyFocusCard";
 import InsightCards from "./components/InsightCards";
 import WeeklyChallengeCard from "./components/WeeklyChallengeCard";
 import BadgeUnlockModal from "./components/BadgeUnlockModal";
+import RecordingBadgesCard from "./components/RecordingBadgesCard";
+import { pickRecordingBadgeUnlock } from "../lib/badges";
 import ProtectedRoute from "../components/ProtectedRoute";
 import { useEffect, useState, useMemo } from "react";
 import dynamic from "next/dynamic";
@@ -128,8 +130,9 @@ export default function Home() {
           ...checkBadges("goal", { completedGoals: g.filter(gl => gl.saved >= gl.target).length }),
         ];
         
-        if (newlyUnlocked.length > 0) {
-          setBadgeUnlock({ open: true, badgeId: newlyUnlocked[0] });
+        const badgeId = pickRecordingBadgeUnlock(newlyUnlocked);
+        if (badgeId) {
+          setBadgeUnlock({ open: true, badgeId });
         }
       } catch (error) {
         console.error("Error loading data:", error);
@@ -232,7 +235,16 @@ export default function Home() {
               note: data.note || "",
             };
             
-            setTransactions((prev) => [newTransaction, ...prev]);
+            setTransactions((prev) => {
+              const updated = [newTransaction, ...prev];
+              const transactionCount = updated.length;
+              const newlyUnlocked = checkBadges("transaction", { transactionCount, consecutiveDays: 0 });
+              const badgeId = pickRecordingBadgeUnlock(newlyUnlocked);
+              if (badgeId) {
+                setBadgeUnlock({ open: true, badgeId });
+              }
+              return updated;
+            });
             showToast("✓ Transaksi tercatat! Streak +1", "success");
           } catch (error) {
             console.error("Error adding transaction:", error);
@@ -250,6 +262,8 @@ export default function Home() {
           <div className="text-3xl font-semibold mt-1">{streak} 🔥</div>
         </Card>
       </div>
+
+      <RecordingBadgesCard transactionCount={transactions.length} />
 
       <DailyFocusCard action={dailyFocusAction} />
 

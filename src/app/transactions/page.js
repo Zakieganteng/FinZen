@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, SectionHeader, AddTransactionModal } from "../ui";
 import { checkBadges, calculateStreak, showToast } from "../../lib/utils";
+import { pickRecordingBadgeUnlock } from "../../lib/badges";
+import BadgeUnlockModal from "../components/BadgeUnlockModal";
 import { useAuth } from "../../contexts/AuthContext";
 import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "../../lib/supabase/data-service";
 
@@ -21,6 +23,7 @@ export default function TransactionsPage() {
   const [openAdd, setOpenAdd] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
+  const [badgeUnlock, setBadgeUnlock] = useState({ open: false, badgeId: null });
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -125,10 +128,14 @@ export default function TransactionsPage() {
         }
       }
       
-      // Check transaction badges
-      checkBadges("transaction", { transactionCount, consecutiveDays });
-      // Check streak badges
-      checkBadges("streak", { streak });
+      const newlyUnlocked = [
+        ...checkBadges("transaction", { transactionCount, consecutiveDays }),
+        ...checkBadges("streak", { streak }),
+      ];
+      const badgeId = pickRecordingBadgeUnlock(newlyUnlocked);
+      if (badgeId) {
+        setBadgeUnlock({ open: true, badgeId });
+      }
     } catch (error) {
       console.error("Error adding transaction:", error);
       showToast("Gagal menambahkan transaksi. Coba lagi.", "error");
@@ -269,6 +276,12 @@ export default function TransactionsPage() {
       </Card>
 
       <AddTransactionModal open={openAdd} onClose={() => setOpenAdd(false)} onAdded={onAdded} />
+
+      <BadgeUnlockModal
+        open={badgeUnlock.open}
+        onClose={() => setBadgeUnlock({ open: false, badgeId: null })}
+        badgeId={badgeUnlock.badgeId}
+      />
     </div>
   );
 }
