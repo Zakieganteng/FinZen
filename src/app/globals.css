@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+  --muted: #4b5563; /* slate-600 */
+  --card: #ffffff;
+  --border: rgba(0,0,0,0.08);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --muted: #9ca3af; /* gray-400 */
+  --card: #121212;
+  --border: rgba(255,255,255,0.145);
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Utility helpers to ensure consistent contrast */
+.text-muted { color: var(--muted); }
+.card { background: var(--card); }
+.border-base { border-color: var(--border); }
+
+/* Improve contrast of recharts default labels in both themes */
+.recharts-default-tooltip { 
+  color: var(--foreground) !important;
+  background: var(--card) !important; 
+  border: 1px solid var(--border) !important;
+}
+.recharts-default-tooltip * {
+  color: var(--foreground) !important;
+}
+.recharts-tooltip-label {
+  color: var(--foreground) !important;
+}
+.recharts-tooltip-item-list {
+  color: var(--foreground) !important;
+}
+.recharts-tooltip-item-value {
+  color: var(--foreground) !important;
+}
+.recharts-tooltip-item-name {
+  color: var(--foreground) !important;
+}
+.recharts-cartesian-axis-tick-value tspan { fill: var(--foreground) !important; }
+.recharts-legend-item-text { fill: var(--foreground) !important; }
+.recharts-pie-label-text { fill: var(--foreground) !important; }
+.recharts-label { fill: var(--foreground) !important; }
+
+/* Ensure bar chart colors remain visible in dark mode */
+.recharts-bar-rectangle {
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+}
+.dark .recharts-bar-rectangle {
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+}
+path.recharts-rectangle {
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+}
+.dark path.recharts-rectangle {
+  fill-opacity: 1 !important;
+  opacity: 1 !important;
+}
+
+/* Progress bar animations */
+.progress-bar-fill {
+  transition: width 300ms ease-out, background-color 200ms ease-in-out;
+}
+
+/* Fade-in animation for auth pages */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out;
+}
+
+/* Celebration animations */
+@keyframes scale-in {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Optimize animations for performance */
+.progress-bar-fill,
+.animate-scale-in {
+  will-change: transform, opacity;
+  transform: translateZ(0); /* Force GPU acceleration */
+}
