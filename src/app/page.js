@@ -170,8 +170,45 @@ export default function Home() {
       }
     };
 
+    const onTransactionDeleted = (e) => {
+      const tx = e.detail;
+      if (!tx?.id) return;
+
+      setTransactions((prev) => prev.filter((t) => t.id !== tx.id));
+
+      const today = new Date();
+      const ym = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+      const txYm = String(tx.date).slice(0, 7);
+      if (txYm === ym && (tx.type || "expense") === "expense") {
+        setBudgets((prev) =>
+          prev.map((b) =>
+            b.name === tx.category
+              ? { ...b, spent: Math.max(0, b.spent - tx.amount) }
+              : b
+          )
+        );
+      }
+    };
+
+    const onBudgetDeleted = (e) => {
+      const { categoryId, name } = e.detail || {};
+      setBudgets((prev) =>
+        prev.filter((b) => {
+          if (categoryId && b.id === categoryId) return false;
+          if (name && b.name === name) return false;
+          return true;
+        })
+      );
+    };
+
     window.addEventListener("finzen:transaction-added", onFabTransaction);
-    return () => window.removeEventListener("finzen:transaction-added", onFabTransaction);
+    window.addEventListener("finzen:transaction-deleted", onTransactionDeleted);
+    window.addEventListener("finzen:budget-deleted", onBudgetDeleted);
+    return () => {
+      window.removeEventListener("finzen:transaction-added", onFabTransaction);
+      window.removeEventListener("finzen:transaction-deleted", onTransactionDeleted);
+      window.removeEventListener("finzen:budget-deleted", onBudgetDeleted);
+    };
   }, []);
 
   const streak = useMemo(() => calculateStreak(transactions), [transactions]);

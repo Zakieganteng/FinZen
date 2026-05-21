@@ -22,7 +22,8 @@ export default function RecordingBadgesCard({ transactionCount = 0 }) {
   const unlockedRecording = recordingBadgeDefinitions.filter((b) =>
     unlockedIds.has(b.id)
   ).length;
-  const nextThreshold = THRESHOLDS.find((t) => transactionCount < t) ?? 15;
+  const maxThreshold = THRESHOLDS[THRESHOLDS.length - 1] ?? 100;
+  const nextThreshold = THRESHOLDS.find((t) => transactionCount < t) ?? maxThreshold;
   const progressToNext =
     nextThreshold > 0 ? Math.min(1, transactionCount / nextThreshold) : 1;
 
@@ -45,7 +46,7 @@ export default function RecordingBadgesCard({ transactionCount = 0 }) {
         </div>
       </div>
 
-      {transactionCount < 15 && (
+      {transactionCount < maxThreshold && (
         <div className="mb-4">
           <div className="flex justify-between text-xs text-muted mb-1">
             <span>Menuju {nextThreshold} transaksi</span>

@@ -8,7 +8,7 @@ import { isExpense } from "../../lib/balance";
 import { pickRecordingBadgeUnlock } from "../../lib/badges";
 import BadgeUnlockModal from "../components/BadgeUnlockModal";
 import { useAuth } from "../../contexts/AuthContext";
-import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from "../../lib/supabase/data-service";
+import { getTransactions, createTransaction, deleteTransaction } from "../../lib/supabase/data-service";
 
 // Lazy load Recharts components
 const ResponsiveContainer = dynamic(() => import("recharts").then(mod => mod.ResponsiveContainer), { ssr: false });
@@ -26,6 +26,7 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [badgeUnlock, setBadgeUnlock] = useState({ open: false, badgeId: null });
+  const [deletingId, setDeletingId] = useState(null);
   const itemsPerPage = 10;
 
   useEffect(() => {
@@ -166,6 +167,39 @@ export default function TransactionsPage() {
     }
   };
 
+  const onDelete = async (transaction) => {
+    const label = `${transaction.category} · ${transaction.amount.toLocaleString("id-ID")}`;
+    if (!confirm(`Hapus transaksi ini?\n\n${label}\n\nTindakan ini tidak bisa dibatalkan.`)) return;
+
+    setDeletingId(transaction.id);
+    try {
+      const { error } = await deleteTransaction(transaction.id);
+      if (error) throw error;
+
+      setTransactions((prev) => {
+        const next = prev.filter((t) => t.id !== transaction.id);
+        const newTotalPages = Math.max(1, Math.ceil(next.length / itemsPerPage));
+        if (currentPage > newTotalPages) {
+          setCurrentPage(newTotalPages);
+        }
+        return next;
+      });
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("finzen:transaction-deleted", { detail: transaction })
+        );
+      }
+
+      showToast("Transaksi berhasil dihapus.", "success");
+    } catch (error) {
+      console.error("Error deleting transaction:", error);
+      showToast("Gagal menghapus transaksi. Coba lagi.", "error");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   if (loading || authLoading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -229,6 +263,7 @@ export default function TransactionsPage() {
                 <th className="text-left p-3">Kategori</th>
                 <th className="text-left p-3">Jumlah</th>
                 <th className="text-left p-3">Catatan</th>
+                <th className="text-right p-3 w-24">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -245,11 +280,22 @@ export default function TransactionsPage() {
                     {t.type === "income" ? "+" : "−"}
                     {t.amount.toLocaleString("id-ID")}
                   </td>
-                  <td className="p-3">{t.note}</td>
+                  <td className="p-3">{t.note || "—"}</td>
+                  <td className="p-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onDelete(t)}
+                      disabled={deletingId === t.id}
+                      className="text-sm px-2.5 py-1.5 rounded-md border border-base text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+                      aria-label={`Hapus transaksi ${t.category}`}
+                    >
+                      {deletingId === t.id ? "…" : "Hapus"}
+                    </button>
+                  </td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={5} className="p-8 text-center text-muted">
+                  <td colSpan={6} className="p-8 text-center text-muted">
                     Belum ada transaksi. Tambah transaksi pertama Anda!
                   </td>
                 </tr>

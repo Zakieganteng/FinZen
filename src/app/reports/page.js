@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { Card, SectionHeader } from "../ui";
 import { useAuth } from "../../contexts/AuthContext";
-import { getTransactions } from "../../lib/supabase/data-service";
+import { getTransactions, deleteTransaction } from "../../lib/supabase/data-service";
 import { showToast } from "../../lib/utils";
 import { isExpense } from "../../lib/balance";
 import {
@@ -143,6 +143,29 @@ export default function ReportsPage() {
     : monthlySpendingByCategory;
 
   const [exporting, setExporting] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  const onDeleteTransaction = async (t) => {
+    const label = `${t.category} · ${(t.amount || 0).toLocaleString("id-ID")}`;
+    if (!confirm(`Hapus transaksi ini?\n\n${label}`)) return;
+
+    setDeletingId(t.id);
+    try {
+      const { error } = await deleteTransaction(t.id);
+      if (error) throw error;
+
+      setTransactions((prev) => prev.filter((x) => x.id !== t.id));
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("finzen:transaction-deleted", { detail: t }));
+      }
+      showToast("Transaksi berhasil dihapus.", "success");
+    } catch (err) {
+      console.error(err);
+      showToast("Gagal menghapus transaksi.", "error");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   function exportInstagramPng() {
     if (chartsData.length === 0 && presetTotal === 0) {
@@ -352,6 +375,7 @@ export default function ReportsPage() {
                 <th className="text-left p-3">Kategori</th>
                 <th className="text-left p-3">Jumlah</th>
                 <th className="text-left p-3">Catatan</th>
+                <th className="text-right p-3 w-24">Aksi</th>
               </tr>
             </thead>
             <tbody>
@@ -360,11 +384,21 @@ export default function ReportsPage() {
                   <td className="p-3">{t.date}</td>
                   <td className="p-3">{t.category}</td>
                   <td className="p-3">{(t.amount||0).toLocaleString('id-ID')}</td>
-                  <td className="p-3">{t.note}</td>
+                  <td className="p-3">{t.note || "—"}</td>
+                  <td className="p-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onDeleteTransaction(t)}
+                      disabled={deletingId === t.id}
+                      className="text-sm px-2.5 py-1.5 rounded-md border border-base text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                    >
+                      {deletingId === t.id ? "…" : "Hapus"}
+                    </button>
+                  </td>
                 </tr>
               ))}
               {txForPreset.length===0 ? (
-                <tr><td className="p-3 text-muted" colSpan={4}>Belum ada transaksi pada rentang ini.</td></tr>
+                <tr><td className="p-3 text-muted" colSpan={5}>Belum ada transaksi pada rentang ini.</td></tr>
               ) : null}
             </tbody>
           </table>

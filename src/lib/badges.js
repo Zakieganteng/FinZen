@@ -27,44 +27,41 @@ export const badgeDefinitions = [
     },
   },
   
-  // Transaction badges — simulasi pencatat (tier 5 / 10 / 15)
-  {
-    id: "catatan_5",
-    name: "Pencatat Pemula",
-    description: "Telah mencatat minimal 5 transaksi",
-    icon: "📒",
-    category: "transaction",
-    threshold: 5,
-    condition: (data) => data.transactionCount >= 5,
-  },
+  // Transaction badges — penghargaan pencatat (tier 10 / 50 / 100)
   {
     id: "catatan_10",
-    name: "Pencatat Aktif",
+    name: "Pencatat Pemula",
     description: "Telah mencatat minimal 10 transaksi",
-    icon: "📗",
+    icon: "📒",
     category: "transaction",
     threshold: 10,
     condition: (data) => data.transactionCount >= 10,
   },
   {
-    id: "catatan_15",
+    id: "catatan_50",
+    name: "Pencatat Aktif",
+    description: "Telah mencatat minimal 50 transaksi",
+    icon: "📗",
+    category: "transaction",
+    threshold: 50,
+    condition: (data) => data.transactionCount >= 50,
+  },
+  {
+    id: "catatan_100",
     name: "Pencatat Rajin",
-    description: "Telah mencatat minimal 15 transaksi",
+    description: "Telah mencatat minimal 100 transaksi",
     icon: "📘",
     category: "transaction",
-    threshold: 15,
-    condition: (data) => data.transactionCount >= 15,
+    threshold: 100,
+    condition: (data) => data.transactionCount >= 100,
   },
   {
     id: "record_keeper",
     name: "Record Keeper",
-    description: "Telah mencatat 100 transaksi",
+    description: "Telah mencatat 250 transaksi",
     icon: "📝",
     category: "transaction",
-    condition: (data) => {
-      // data: { transactionCount }
-      return data.transactionCount >= 100;
-    },
+    condition: (data) => data.transactionCount >= 250,
   },
   {
     id: "daily_tracker",
@@ -144,9 +141,9 @@ export function getBadgesByCategory(category) {
   return badgeDefinitions.filter(b => b.category === category);
 }
 
-/** Badge simulasi: penghargaan mencatat transaksi (5, 10, 15) */
+/** Badge pencatat yang ditampilkan di dashboard (10, 50, 100) */
 export const recordingBadgeDefinitions = badgeDefinitions.filter(
-  (b) => b.id === "catatan_5" || b.id === "catatan_10" || b.id === "catatan_15"
+  (b) => b.id === "catatan_10" || b.id === "catatan_50" || b.id === "catatan_100"
 );
 
 export const RECORDING_BADGE_IDS = recordingBadgeDefinitions.map((b) => b.id);

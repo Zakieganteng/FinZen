@@ -6,7 +6,7 @@ import { ProgressBar, Card, SectionHeader, AddTransactionModal, Modal } from "..
 import { showToast, parseCurrencyInput, handleCurrencyInputChange } from "../../lib/utils";
 import { isExpense } from "../../lib/balance";
 import { useAuth } from "../../contexts/AuthContext";
-import { getBudgets, upsertBudget, getTransactions, createTransaction } from "../../lib/supabase/data-service";
+import { getBudgets, upsertBudget, deleteBudget, getTransactions, createTransaction } from "../../lib/supabase/data-service";
 import { categories as presetCategories } from "../../lib/data";
 
 // Lazy load Recharts components
@@ -46,6 +46,7 @@ export default function BudgetingPage() {
     amount: "",
   });
   const [addBudgetSubmitting, setAddBudgetSubmitting] = useState(false);
+  const [deletingBudgetId, setDeletingBudgetId] = useState(null);
 
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -59,7 +60,8 @@ export default function BudgetingPage() {
         const { data, error } = await getBudgets(user.id, ym);
         if (error) throw error;
 
-        const bg = (data || []).map(b => ({
+        const bg = (data || []).map((b) => ({
+          budgetId: b.id,
           id: b.category_id,
           name: b.category_name,
           color: b.color || "#3B82F6",
@@ -91,8 +93,25 @@ export default function BudgetingPage() {
       );
     };
 
+    const onTransactionDeleted = (e) => {
+      const tx = e.detail;
+      if (!tx?.id || txYearMonth(tx.date) !== ym || (tx.type || "expense") !== "expense") return;
+
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.name === tx.category
+            ? { ...c, spent: Math.max(0, c.spent - tx.amount) }
+            : c
+        )
+      );
+    };
+
     window.addEventListener("finzen:transaction-added", onFabTransaction);
-    return () => window.removeEventListener("finzen:transaction-added", onFabTransaction);
+    window.addEventListener("finzen:transaction-deleted", onTransactionDeleted);
+    return () => {
+      window.removeEventListener("finzen:transaction-added", onFabTransaction);
+      window.removeEventListener("finzen:transaction-deleted", onTransactionDeleted);
+    };
   }, [ym]);
 
   const totalBudget = useMemo(() => categories.reduce((s, c) => s + c.budget, 0), [categories]);
@@ -187,6 +206,7 @@ export default function BudgetingPage() {
         const next = [
           ...prev,
           {
+            budgetId: data.id,
             id: categoryId,
             name: categoryName,
             color,
@@ -259,11 +279,55 @@ export default function BudgetingPage() {
 
       if (error) throw error;
 
-      setCategories((prev) => prev.map((c) => (c.id === categoryId ? { ...c, budget: budgetAmount } : c)));
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === categoryId
+            ? { ...c, budget: budgetAmount, budgetId: data?.id || c.budgetId }
+            : c
+        )
+      );
       showToast("✓ Budget diperbarui", "success");
     } catch (error) {
       console.error("Error updating budget:", error);
       showToast("Gagal memperbarui budget. Coba lagi.", "error");
+    }
+  };
+
+  const onDeleteBudget = async (category) => {
+    if (!category.budgetId) {
+      showToast("Data budget tidak valid. Refresh halaman.", "error");
+      return;
+    }
+
+    if (
+      !confirm(
+        `Hapus budget "${category.name}" untuk bulan ini?\n\nLimit ${category.budget.toLocaleString("id-ID")} akan dihapus. Transaksi tetap ada di riwayat.`
+      )
+    ) {
+      return;
+    }
+
+    setDeletingBudgetId(category.budgetId);
+    try {
+      const { error } = await deleteBudget(category.budgetId);
+      if (error) throw error;
+
+      setCategories((prev) => prev.filter((c) => c.budgetId !== category.budgetId));
+
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("finzen:budget-deleted", {
+            detail: { categoryId: category.id, name: category.name },
+          })
+        );
+      }
+
+      showToast("Budget berhasil dihapus.", "success");
+    } catch (err) {
+      console.error("Error deleting budget:", err);
+      showToast("Gagal menghapus budget. Coba lagi.", "error");
+    } finally {
+      setDeletingBudgetId(null);
     }
   };
 
@@ -379,10 +443,36 @@ export default function BudgetingPage() {
               </div>
               <div className="text-sm text-muted mb-2">{c.spent.toLocaleString("id-ID")} / {c.budget.toLocaleString("id-ID")}</div>
               <ProgressBar value={pct} color={c.color} current={c.spent} target={c.budget} showTooltip={true} />
-              <div className="flex gap-2 mt-3">
-                <button className="text-sm px-3 py-1.5 rounded-md border border-base" onClick={() => setBudget(c.id, Math.max(0, c.budget - 50000))}>-50k</button>
-                <button className="text-sm px-3 py-1.5 rounded-md border border-base" onClick={() => setBudget(c.id, c.budget + 50000)}>+50k</button>
-                <button className="ml-auto text-sm px-3 py-1.5 rounded-md border border-base" onClick={() => openQuickAdd(c.name)}>+ Catat</button>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  type="button"
+                  className="text-sm px-3 py-1.5 rounded-md border border-base"
+                  onClick={() => setBudget(c.id, Math.max(0, c.budget - 50000))}
+                >
+                  -50k
+                </button>
+                <button
+                  type="button"
+                  className="text-sm px-3 py-1.5 rounded-md border border-base"
+                  onClick={() => setBudget(c.id, c.budget + 50000)}
+                >
+                  +50k
+                </button>
+                <button
+                  type="button"
+                  className="text-sm px-3 py-1.5 rounded-md border border-base"
+                  onClick={() => openQuickAdd(c.name)}
+                >
+                  + Catat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDeleteBudget(c)}
+                  disabled={deletingBudgetId === c.budgetId}
+                  className="ml-auto text-sm px-3 py-1.5 rounded-md border border-base text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                >
+                  {deletingBudgetId === c.budgetId ? "Menghapus…" : "Hapus"}
+                </button>
               </div>
             </Card>
           );
